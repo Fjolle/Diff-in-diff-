@@ -1,11 +1,32 @@
 ---
-title: "Diff_in_diff_replication"
+title: "Difference in difference replication"
 author: "Fjolle Gjonbalaj"
-date: "15/04/2021"
-output: html_document
+output:
+   html_document:
+   theme: journal
+   highlight: pygments
 ---
 
-```{r setup, include=FALSE}
+_Replication 2_
+
+1.Calculate a propensity score using the same covariates as used in the mixtape only use a series of polynomials for each one.  You will do the            following analysis twice: once using a logit, once using OLS, to fit the propensity score.
+  
+a.You will fit a linear probability model (OLS) for one of the following and you will fit a logit for the second.  
+           
+b.Fit one propensity score using up to a quadratic for each variable for one set of analysis, and a cubic for a separate set of analysis. 
+           
+c.Create a histogram showing the distribution of the propensity score for the treatment and control group. What is the max and min values of the propensity score for the treatment group? What is it for the control group?
+           
+d.Drop all units whose propensity scores are less than 0.1 and more than 0.9 then repeat 1.c.
+
+
+```{r setup, include=FALSE, echo=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE, echo=FALSE,include=FALSE}
+library(tidyverse)
+library(haven)
+library(ggthemes)
 ```
 
