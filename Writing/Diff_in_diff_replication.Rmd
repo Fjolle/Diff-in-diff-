@@ -9,7 +9,7 @@ output:
 
 _Replication 2_
 
-1.Calculate a propensity score using the same covariates as used in the mixtape only use a series of polynomials for each one.  You will do the            following analysis twice: once using a logit, once using OLS, to fit the propensity score.
+1.Calculate a propensity score using the same covariates as used in the mixtape only use a series of polynomials for each one.  You will do the following analysis twice: once using a logit, once using OLS, to fit the propensity score.
   
 a.You will fit a linear probability model (OLS) for one of the following and you will fit a logit for the second.  
            
@@ -30,3 +30,257 @@ library(haven)
 library(ggthemes)
 ```
 
+```{r, warning=FALSE, echo=FALSE,include=FALSE}
+nsw_mixtape <-read_dta("https://github.com/scunning1975/mixtape/raw/master/nsw_mixtape.dta") %>%
+  filter(treat != 0)
+
+cps_mixtape <-read_dta("https://github.com/scunning1975/mixtape/raw/master/cps_mixtape.dta")
+
+nsw_cps_abadie<-   nsw_mixtape %>%  bind_rows(cps_mixtape)
+
+
+nsw_cps_abadie <- 
+  nsw_cps_abadie %>%
+  mutate(agesq = age^2,
+         agecb=age^3,
+         educsq = educ^2,
+         u74 = case_when(re74 == 0 ~ 1,
+         !is.nan(re74) == TRUE ~ 0),
+         u75 = case_when(re75 == 0 ~ 1,
+         !is.nan(re75) == TRUE ~ 0),
+         educ_re74 = educ * re74,
+         u74_hisp = u74 * hisp)
+```
+
+*(a) LPM Model with quadratic variables and Logit model with cubic variable.*
+```{r, warning=FALSE, echo=FALSE}
+LPM<- lm(treat ~ age + agesq + educ + educsq + marr +
+           nodegree + black + hisp + re75 + u75,
+          data = nsw_cps_abadie)
+
+
+logit <- glm(treat ~ age + agesq + agecb + educ + educsq + marr + nodegree + 
+               black + hisp + re75 + u75, 
+             family = binomial(link = "logit"), data = nsw_cps_abadie)
+```
+
+It is generally advised that we use the logit model when estimating the propensity score in that the latter gives us fitted values that are in the range between 0 and 1. On the other hand, while we could use the linear probability model, its interpretation will be a lot harder because it gives us probabilities outside of the 0,1 range, which are not true probabilities since 0<=p<=1
+
+
+*(b) LPM and Logit model Propensity Scores*
+```{r, warning=FALSE, echo=FALSE}
+LPM_prop <- tibble(Pscore = predict(LPM, type = "response"),treat = LPM$model$treat)
+
+logit_prop <-tibble(Pscore = predict(logit, type = "response"),treat = logit$model$treat)
+```
+
+Propensity score matching is a matching technique that estimates the effect of a treatment for the covariates that predict receiving the treatment. It tries to reduce the bias due to confounding variables that are often found in an estimate of the treatment effect from simply comparing outcomes among units that received the treatment versus those that did not.
+
+*(c)* 
+```{r, warning=FALSE, echo=FALSE}
+characteristics=c("1", "0")
+names(characteristics)=c("1","0")
+```
+
+*(c)Histogram for the LPM model showing the distribution of the propensity score for the treatment and control group separately.*
+```{r, warning=FALSE, echo=FALSE}
+LPM_prop %>%  ggplot() +
+  geom_histogram(aes(x = Pscore),fill = 'lightblue', color = 'black', alpha = 5, bins=25) + 
+  labs(x = "Propensity Score", y = "Density") +  theme_base() + 
+  facet_wrap(~ treat,scales="free_y", labeller = labeller(treat = characteristics)) 
+
+```
+
+It can be noticed on the left-hand side histogram that the linear probability model has a distribution with essentially a mean around zero. This means that some of its values are actually negative. With probabilities this cannot be the case. The use of the logit model here can be a lot more informative.
+
+*(c)Histogram for the Logit model showing the distribution of the propensity score for the treatment and control group separately.*
+```{r, warning=FALSE, echo=FALSE}
+logit_prop %>%  ggplot() +
+  geom_histogram(aes(x = Pscore), fill = 'lightblue', color = 'black', alpha = 5, bins=25) + 
+  labs(x = "Propensity Score", y = "Density") +  theme_base() + 
+  facet_wrap(~ treat, scales="free_y", labeller = labeller(treat = characteristics)) 
+
+```
+
+
+Here we see that there is significant bunching at the left end of the propensity score distribution. This is suggestive that we have units that differ remarkably on observables with respect to the treatment. One way around this is to trim the data around extreme values.
+
+
+*Minimum and maximum values of the propensity score for the treatment group in the LPM model*
+```{r, warning=FALSE, echo=FALSE}
+LPM_prop %>%  group_by(treat) %>%
+  summarise(maximum = round(max(Pscore), 3), minimum = round(min(Pscore), 3)) %>%
+  mutate(treat = if_else(treat == 0, "0", "1"))
+```
+
+For treat==0, before trimming the data, the maximum value for the treatment group in the lpm model is 0.182, while the minimum is -0.009. On the other hand, in the Control group the maximum value is 0.182 while the minimum value is -0.057.
+
+*Minimum and maximum values of the propensity score for the treatment group in the Logit model*
+```{r, warning=FALSE, echo=FALSE}
+# Logit -- max/min
+logit_prop %>% group_by(treat) %>%
+  summarise(maximum = round(max(Pscore), 3), minimum = round(min(Pscore), 3)) %>%
+  mutate(treat = if_else(treat == 0, "0", "1"))
+```
+
+
+For treat==0, in the logit model, the maximum value of the propensity score in the control group is 0.871, while the minimum value is essentially 0. In the treatment group the maximum value is 0.881, while the minimum is slightly above 0.
+
+*(d) Histogram with trimmed data for the Linear Probability Model*
+```{r, warning=FALSE, echo=FALSE}
+LPM_prop %>%  filter(between(Pscore, 0.1, 0.9)) %>%  ggplot() +
+  geom_histogram(aes(x = Pscore), fill = 'lightblue', color = 'black', alpha = 5) + 
+  labs(x = "Propensity Score", y = "Density") + theme_base() + 
+  facet_wrap(~ treat,scales="free_y",  labeller = labeller(treat = characteristics)) 
+
+```
+
+After trimming the data to get rid of values below 0.1 and above 0.9 of the propensity score we get histograms that do not take any negative values.
+
+*(d) Histogram with trimmed data for the Logit Model*
+```{r, warning=FALSE, echo=FALSE}
+logit_prop %>%  filter(between(Pscore, 0.1, 0.9)) %>%  ggplot() +
+  geom_histogram(aes(x = Pscore), fill = 'lightblue', color = 'black', alpha = 5, bins=25) + 
+  labs(x = "Propensity Score", y = "Density") +  theme_base() + 
+  facet_wrap(~ treat, scales="free_y", labeller = labeller(treat = characteristics)) 
+```
+
+After trimming the data the problem of bunching has also been resolved.
+
+
+*(d)Minimum and maximum values of the propensity score for the treatment group in the LPM model with trimmed data*
+```{r, warning=FALSE, echo=FALSE}
+LPM_prop %>%filter(between(Pscore, 0.1, 0.9)) %>%  group_by(treat) %>%
+  summarise(maximum = round(max(Pscore), 3), minimum = round(min(Pscore), 3)) %>%
+  mutate(treat = if_else(treat == 0, "0", "1"))
+```
+
+After trimming the data the lpm model no longer contains any negative minimum values for either its control or its treatment groups.
+
+
+*(d)Minimum and maximum values of the propensity score for the treatment group in the Logit model with trimmed data*
+```{r, warning=FALSE, echo=FALSE}
+logit_prop %>% filter(between(Pscore, 0.1, 0.9)) %>% group_by(treat) %>%
+  summarise(maximum = round(max(Pscore), 3), minimum = round(min(Pscore), 3)) %>%
+  mutate(treat = if_else(treat == 0, "0", "1")) 
+```
+
+Similarly for the logit model, the minimum values shift from 0 to becoming closer to 0.1. On the other hand, the maximum values remain essentially unchanged.
+
+*Question 2*
+
+*Linear Probability Model -Before and After First Difference*
+```{r, warning=FALSE, echo=FALSE}
+y1_lpm <- LPM_prop %>%filter(treat == 1) %>%pull(Pscore) %>%  mean()
+y0_lpm <- LPM_prop %>%  filter(treat == 0) %>%pull(Pscore) %>%  mean()
+sd_lpm <- round(y1_lpm - y0_lpm, 3)
+sd_lpm
+```
+Before and after first difference in the propensity score of the linear probability model is ~0.122.
+
+```{r, warning=FALSE, echo=FALSE}
+y1_logit <- logit_prop %>% filter(treat == 1) %>%pull(Pscore) %>% mean() 
+y0_logit <- logit_prop %>% filter(treat == 0) %>% pull(Pscore) %>% mean() 
+sd_logit <- round(y1_logit - y0_logit, 3)
+sd_logit
+```
+
+
+Before and after first difference in the propensity score of the logit model is ~0.371.
+
+Construct a weighted difference-in-differences using the first equation at the following substack entry: https://causalinf.substack.com/p/callaway-and-santanna-dd-estimator. Ignore inference issues. We are only going to calculate the point estimate. Compare your answers to that I found in the ipw.do program at section 5.3.5 of the Mixtape. I found an ATT of 1806 dollars or 2006 dollars depending on which weighting scheme I used. Compare your answers to those.
+
+
+*Question 3 Weighted Diff-in-diff*
+```{r, warning=FALSE, echo=FALSE}
+nsw_cps_abadie <- nsw_cps_abadie %>% cbind(pscore = logit_prop$Pscore)
+N <- nrow(nsw_cps_abadie)
+```
+
+
+*With non-normalized weights*
+```{r, warning=FALSE, echo=FALSE}
+nsw_cps_abadie <- nsw_cps_abadie %>% 
+  mutate(d1 = treat/pscore,
+         d0 = (1 - treat)/(1 - pscore))
+s1 <- sum(nsw_cps_abadie$d1)
+s0 <- sum(nsw_cps_abadie$d0)
+
+nsw_cps_abadie <- nsw_cps_abadie %>% 
+  mutate(y1 = treat * re78/pscore,
+         y0 = (1 - treat) * re78/(1 - pscore),
+         ht = y1 - y0)
+```
+
+
+*With normalized weights*
+```{r, warning=FALSE, echo=FALSE}
+nsw_cps_abadie <- nsw_cps_abadie %>% 
+  mutate(y1 = (treat*re78/pscore)/(s1/N),
+         y0 = ((1 - treat)*re78/(1 - pscore))/(s0/N),
+         norm = y1 - y0)
+
+nsw_cps_abadie %>% 
+  pull(ht) %>% 
+  mean()
+
+nsw_cps_abadie %>% 
+  pull(norm) %>% 
+  mean()
+```
+
+*The treatment effect with te non-normalized weighting procedure gives us an Average Treatment on the Treated of - $11564.42.On the other hand, the treatment effect with normalized weights gives me -$6182.63.*
+
+*Trimming the Propensity Score*
+```{r, warning=FALSE, echo=FALSE}
+nsw_cps_abadie <- nsw_cps_abadie %>% 
+  select(-d1, -d0, -y1, -y0, -ht, -norm) %>% 
+  filter(!(pscore >= 0.9)) %>% 
+  filter(!(pscore <= 0.1))
+```
+
+
+*With non-normalized weights using trimmed data*
+```{r, warning=FALSE, echo=FALSE}
+nsw_cps_abadie <- nsw_cps_abadie %>% 
+  mutate(d1 = treat/pscore,
+         d0 = (1 - treat)/(1 - pscore))
+
+s1 <- sum(nsw_cps_abadie$d1)
+s0 <- sum(nsw_cps_abadie$d0)
+
+nsw_cps_abadie <- nsw_cps_abadie %>% 
+  mutate(y1 = treat * re78/pscore,
+         y0 = (1 - treat) * re78/(1 - pscore),
+         ht = y1 - y0)
+
+```
+
+*With normalized weights using trimmed data*
+```{r, warning=FALSE, echo=FALSE}
+nsw_cps_abadie <- nsw_cps_abadie %>% 
+  mutate(y1 = (treat*re78/pscore)/(s1/N),
+         y0 = ((1 - treat)*re78/(1 - pscore))/(s0/N),
+         norm = y1 - y0)
+
+nsw_cps_abadie %>% 
+  pull(ht) %>% 
+  mean()
+
+nsw_cps_abadie %>% 
+  pull(norm) %>% 
+  mean()
+
+```
+
+*Using trimmed data for the propensity score by only looking at values between 0.1 and 0.9, gives me a treatment effect of +$218.7165 with non-normalized weights. With normalized weights, on the other hand, I get $+27826.51.*
+
+*From Substack*
+```{r, warning=FALSE, echo=FALSE}
+CalSant <- mean(nsw_cps_abadie$pscore)
+nsw_cps_abadie %>%
+  mutate(estimator = (re78 - re75)/CalSant * (treat - pscore) / (1 - pscore)) %>%
+  summarise(mean(estimator),sd(estimator)/sqrt(n()))
+```
+
+*Using the Callaway and Sant'anna DD estimator I get mean estimator of $1282.446 and an sd estimator of $1052.451.This is closer to the values found on the Mixtape.*
